@@ -197,15 +197,20 @@ def welcome_page(candle_df, open_df, gap_df, thresholds, hist_df=None):
         else:
             cpr_pos = 'Inside_CPR'
 
-        if prev_range == 0:
-            quart = 'Open_Middle_Half'
-        else:
-            if (prev_high - today_open) / prev_range < 0.25:
-                quart = 'Open_Top_Quartile'
-            elif (today_open - prev_low) / prev_range < 0.25:
-                quart = 'Open_Bottom_Quartile'
-            else:
+        # Quartile classification: only applies when open is INSIDE previous range
+        if pos == 'Open_Inside_Prev_Range':
+            if prev_range == 0:
                 quart = 'Open_Middle_Half'
+            else:
+                if (prev_high - today_open) / prev_range < 0.25:
+                    quart = 'Open_Top_Quartile'
+                elif (today_open - prev_low) / prev_range < 0.25:
+                    quart = 'Open_Bottom_Quartile'
+                else:
+                    quart = 'Open_Middle_Half'
+        else:
+            # No quartile classification for opens outside the range
+            quart = 'Open_Outside_Range'
 
         open_context = f"{pos}|{cpr_pos}|{quart}"
 
@@ -229,14 +234,34 @@ def welcome_page(candle_df, open_df, gap_df, thresholds, hist_df=None):
         st.session_state['edge_result'] = edge_result
         st.session_state['nav_page'] = 'Edge Detection'
         
-        # Display CPR metrics
+        # Display verification section with all key metrics
         st.success('✅ Edges computed successfully!')
-        st.markdown('### CPR Levels')
+        
+        st.markdown('### 📍 Previous Day Summary')
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric('Pivot (PP)', f'{pp:.2f}', delta=None)
-        col2.metric('Top CPR (TC)', f'{tc:.2f}', delta=None)
-        col3.metric('Bottom CPR (BC)', f'{bc:.2f}', delta=None)
-        col4.metric('Range', f'{prev_range:.2f}', delta=None)
+        col1.metric('High', f'{prev_high:.2f}')
+        col2.metric('Low', f'{prev_low:.2f}')
+        col3.metric('Close', f'{prev_close:.2f}')
+        col4.metric('Range', f'{prev_range:.2f}')
+        
+        st.markdown('### 📊 CPR Levels (Central Pivot Range)')
+        col1, col2, col3 = st.columns(3)
+        col1.metric('Pivot Point (PP)', f'{pp:.2f}', help='Central support/resistance level')
+        col2.metric('Top CPR (TC)', f'{tc:.2f}', help='Highest resistance level')
+        col3.metric('Bottom CPR (BC)', f'{bc:.2f}', help='Lowest support level')
+        
+        st.markdown('### 📈 Today\'s Gap Analysis')
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric('Today\'s Open', f'{today_open:.2f}')
+        col2.metric('Gap Size', f'{abs(gap):.2f}', delta=gap_dir)
+        col3.metric('Gap %', f'{abs(gap_pct)*100:.2f}%' if gap_pct else 'N/A', help='Gap as % of previous range')
+        col4.metric('Gap Bucket', gap_bucket if gap_bucket else 'Unknown', help='Gap size classification')
+        
+        st.markdown('### 🎯 Open Context Classification')
+        col1, col2, col3 = st.columns(3)
+        col1.metric('Position', pos, help='Open relative to previous day range')
+        col2.metric('CPR Position', cpr_pos, help='Open relative to CPR levels')
+        col3.metric('Quartile', quart if pos == 'Open_Inside_Prev_Range' else '—', help='Position within previous range')
 
         # show historical actual next-day outcome if historical loaded
         if hist_df is not None:
@@ -356,6 +381,7 @@ def edge_detection_page(candle_df, open_df, gap_df, thresholds):
             r = row.iloc[0]
             st.metric('Sample Size', int(r['total_count']), help='Number of historical occurrences of this open context')
             
+            # Display trend probabilities with gauges
             fig2 = make_subplots(rows=1, cols=2, specs=[[{'type': 'indicator'}, {'type': 'indicator'}]])
             trend_up = float(r['prob_trend_up']) * 100
             trend_down = float(r['prob_trend_down']) * 100
@@ -377,11 +403,32 @@ def edge_detection_page(candle_df, open_df, gap_df, thresholds):
             fig2.update_layout(height=220, margin={'t': 30, 'b': 0})
             st.plotly_chart(fig2, use_container_width=True)
             
-            col1, col2 = st.columns(2)
-            col1.metric('PDH Break Success', f"{float(r['prob_pdh_break_success']):.2%}", 
-                       help='Probability of PDH breakout success')
-            col2.metric('PDL Break Success', f"{float(r['prob_pdl_break_success']):.2%}", 
-                       help='Probability of PDL breakout success')
+            # Display all breakdown probabilities in a grid with exact numerical values
+            st.markdown('**Key Probability Breakdowns:**')
+            col1, col2, col3, col4 = st.columns(4)
+            
+            col1.metric('Range/Chop Day', 
+                       f"{float(r.get('prob_range_chop', 0)):.2%}",
+                       help='Probability of range-bound / choppy day')
+            col2.metric('False PDH Break', 
+                       f"{float(r.get('prob_false_pdh_break', 0)):.2%}",
+                       help='Probability of false breakout above PDH')
+            col3.metric('False PDL Break', 
+                       f"{float(r.get('prob_false_pdl_break', 0)):.2%}",
+                       help='Probability of false breakout below PDL')
+            col4.metric('Sample Count', 
+                       f"{int(r['total_count'])}", 
+                       help='Trades matching this context')
+            
+            col5, col6, col7, col8 = st.columns(4)
+            col5.metric('PDH Break Success', 
+                       f"{float(r['prob_pdh_break_success']):.2%}", 
+                       help='Probability of successful breakout above PDH')
+            col6.metric('PDL Break Success', 
+                       f"{float(r['prob_pdl_break_success']):.2%}",
+                       help='Probability of successful breakout below PDL')
+            col7.metric('Trend Up %', f"{trend_up:.1f}%", help='Bullish probability')
+            col8.metric('Trend Down %', f"{trend_down:.1f}%", help='Bearish probability')
         else:
             st.warning('⚠️ No matching open context in historical stats.')
     
@@ -417,6 +464,73 @@ def edge_detection_page(candle_df, open_df, gap_df, thresholds):
                 st.warning('⚠️ No exact gap bucket; try nearest bucket in data.')
         else:
             st.info('ℹ️ Insufficient data to classify gap bucket.')
+    
+    st.markdown('---')
+    
+    # Summary Card - Combine all three games into actionable signal
+    with st.container():
+        st.markdown('### 🎯 Overall Trading Signal Summary')
+        
+        # Retrieve computed probability scores for synthesis
+        try:
+            # Candle Game probabilities
+            candle_row = candle_df[candle_df['candle_state'] == er['candle_state']]
+            candle_bull = float(candle_row.iloc[0]['prob_trend_up']) if not candle_row.empty else 0
+            candle_bear = float(candle_row.iloc[0]['prob_trend_down']) if not candle_row.empty else 0
+            
+            # Level Game probabilities
+            level_row = open_df[open_df['open_context'] == er['open_context']]
+            level_bull = float(level_row.iloc[0]['prob_trend_up']) if not level_row.empty else 0
+            level_bear = float(level_row.iloc[0]['prob_trend_down']) if not level_row.empty else 0
+            
+            # Gap Game probabilities - determine most likely outcome
+            gap_row = gap_df[(gap_df['gap_direction'] == er['gap_dir']) & (gap_df['gap_bucket'] == er['gap_bucket'])]
+            gap_fill_prob = float(gap_row.iloc[0]['prob_fill_100pct']) if not gap_row.empty else 0
+            
+            # Compute weighted consensus (simple average)
+            consensus_bull = (candle_bull + level_bull) / 2.0
+            consensus_bear = (candle_bear + level_bear) / 2.0
+            
+            # Determine directional bias
+            if consensus_bull > consensus_bear + 0.05:
+                bias = '📈 BULLISH BIAS'
+                bias_color = '🟢'
+            elif consensus_bear > consensus_bull + 0.05:
+                bias = '📉 BEARISH BIAS'
+                bias_color = '🔴'
+            else:
+                bias = '➡️ NEUTRAL / SIDEWAYS'
+                bias_color = '🟡'
+            
+            # Determine gap fill likelihood
+            gap_signal = ''
+            if er['gap_dir'] == 'Gap_Up' and gap_fill_prob > 0.5:
+                gap_signal = ' → Gap may fill lower (watch support)'
+            elif er['gap_dir'] == 'Gap_Down' and gap_fill_prob > 0.5:
+                gap_signal = ' → Gap may fill higher (watch resistance)'
+            
+            # Display summary in highlighted container
+            col_signal, col_confidence = st.columns([2, 1])
+            with col_signal:
+                st.markdown(f"**{bias_color} {bias}{gap_signal}**")
+                st.markdown(f"Candle Game: {candle_bull:.1%} Up / {candle_bear:.1%} Down  \n"
+                           f"Level Game: {level_bull:.1%} Up / {level_bear:.1%} Down  \n"
+                           f"Gap Fill Probability: {gap_fill_prob:.1%}")
+            with col_confidence:
+                avg_confidence = (abs(consensus_bull - consensus_bear) * 100)
+                st.metric('Confidence', f'{avg_confidence:.0f}%', help='Edge conviction level (0-100)')
+            
+            # Action recommendations
+            st.markdown('**📋 Action Guide:**')
+            if consensus_bull > 0.55:
+                st.info('✅ Consider **long entries** with PDH breakout confirmation')
+            elif consensus_bear > 0.55:
+                st.info('✅ Consider **short entries** with PDL breakdown confirmation')
+            else:
+                st.info('⚠️ Weak signal → wait for **intraday confirmation** before trade')
+                
+        except Exception as e:
+            st.warning(f'⚠️ Could not compute summary signal (data incomplete). Trade manually with caution.')
     
     st.markdown('---')
     if st.button('🔄 Clear Data & Start Over', use_container_width=True):
