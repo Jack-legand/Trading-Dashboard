@@ -116,11 +116,11 @@ def compute_level_scenario_stats(level_raw):
 
     def broken_tc_up(row):
         # Open below BC and high > TC
-        return (row['Open'] < row.get('BC', -np.inf)) and (row['High'] > row.get('TC', -np.inf))
+        return (row['Open'] < row.get('BC', -float('inf'))) and (row['High'] > row.get('TC', -float('inf')))
 
     def broken_bc_down(row):
         # Open above TC and low < BC
-        return (row['Open'] > row.get('TC', np.inf)) and (row['Low'] < row.get('BC', np.inf))
+        return (row['Open'] > row.get('TC', float('inf'))) and (row['Low'] < row.get('BC', float('inf')))
 
     def gap_fill(row):
         # We need gap direction and fill; but we don't have gap in level_raw. We'll skip gap scenarios here.
@@ -135,57 +135,57 @@ def compute_level_scenario_stats(level_raw):
     scenarios = [
         # 1. Open below BC
         ('Open below BC',
-         lambda row: row['Open'] < row.get('BC', -np.inf),
+         lambda row: row['Open'] < row.get('BC', -float('inf')),
          [('Touched BC', lambda row: row.get('FirstTouch_BC', False)),
           ('Never touched BC', lambda row: not row.get('FirstTouch_BC', False))]),
 
         # 2. Open below BC & Touched BC
         ('Open below BC & Touched BC',
-         lambda row: (row['Open'] < row.get('BC', -np.inf)) and row.get('FirstTouch_BC', False),
+         lambda row: (row['Open'] < row.get('BC', -float('inf'))) and row.get('FirstTouch_BC', False),
          [('Breaks TC', lambda row: row.get('Broken_TC', False) and row.get('BrokenDirection_TC') == 'Up'),  # Note: we don't have BrokenDirection in raw? Actually we have Broken_TC which is True if high > TC. That's enough.
-          ('Closes below BC', lambda row: row['Close'] < row.get('BC', -np.inf))]),
+          ('Closes below BC', lambda row: row['Close'] < row.get('BC', -float('inf')))]),
 
         # 3. Open below BC & No touch BC
         ('Open below BC & No touch BC',
-         lambda row: (row['Open'] < row.get('BC', -np.inf)) and (not row.get('FirstTouch_BC', False)),
+         lambda row: (row['Open'] < row.get('BC', -float('inf'))) and (not row.get('FirstTouch_BC', False)),
          [('Breaks Prev Low', lambda row: row.get('Broken_PDL', False) and row.get('BrokenDirection_PDL') == 'Down')]),
 
         # 4. Open above TC
         ('Open above TC',
-         lambda row: row['Open'] > row.get('TC', np.inf),
+         lambda row: row['Open'] > row.get('TC', float('inf')),
          [('Touched TC', lambda row: row.get('FirstTouch_TC', False)),
           ('Never touched TC', lambda row: not row.get('FirstTouch_TC', False))]),
 
         # 5. Open above TC & Touched TC
         ('Open above TC & Touched TC',
-         lambda row: (row['Open'] > row.get('TC', np.inf)) and row.get('FirstTouch_TC', False),
+         lambda row: (row['Open'] > row.get('TC', float('inf'))) and row.get('FirstTouch_TC', False),
          [('Breaks BC', lambda row: row.get('Broken_BC', False) and row.get('BrokenDirection_BC') == 'Down'),
-          ('Closes above TC', lambda row: row['Close'] > row.get('TC', np.inf))]),
+          ('Closes above TC', lambda row: row['Close'] > row.get('TC', float('inf')))]),
 
         # 6. Open inside CPR
         ('Open inside CPR',
-         lambda row: (row['Open'] >= row.get('BC', -np.inf)) and (row['Open'] <= row.get('TC', np.inf)),
-         [('Closes above TC', lambda row: row['Close'] > row.get('TC', np.inf)),
-          ('Closes below BC', lambda row: row['Close'] < row.get('BC', -np.inf)),
-          ('Closes within CPR', lambda row: (row['Close'] >= row.get('BC', -np.inf)) and (row['Close'] <= row.get('TC', np.inf)))]),
+         lambda row: (row['Open'] >= row.get('BC', -float('inf'))) and (row['Open'] <= row.get('TC', float('inf'))),
+         [('Closes above TC', lambda row: row['Close'] > row.get('TC', float('inf'))),
+          ('Closes below BC', lambda row: row['Close'] < row.get('BC', -float('inf'))),
+          ('Closes within CPR', lambda row: (row['Close'] >= row.get('BC', -float('inf'))) and (row['Close'] <= row.get('TC', float('inf'))))]),
 
         # 7. Touched Prev Day High
         ('Touched Prev Day High',
          lambda row: row.get('FirstTouch_PDH', False),
-         [('Rejection at PDH', lambda row: (row['High'] > row.get('PDH', -np.inf)) and (row['Close'] < row.get('PDH', -np.inf))),
-          ('Strong breakout above PDH', lambda row: (row['High'] > row.get('PDH', -np.inf)) and (row['Close'] > row.get('PDH', -np.inf)))]),
+         [('Rejection at PDH', lambda row: (row['High'] > row.get('PDH', -float('inf'))) and (row['Close'] < row.get('PDH', -float('inf')))),
+          ('Strong breakout above PDH', lambda row: (row['High'] > row.get('PDH', -float('inf'))) and (row['Close'] > row.get('PDH', -float('inf'))))]),
 
         # 8. Touched Prev Day Low
         ('Touched Prev Day Low',
          lambda row: row.get('FirstTouch_PDL', False),
-         [('Bounce from PDL', lambda row: (row['Low'] < row.get('PDL', np.inf)) and (row['Close'] > row.get('PDL', np.inf))),
-          ('Strong breakdown below PDL', lambda row: (row['Low'] < row.get('PDL', np.inf)) and (row['Close'] < row.get('PDL', np.inf)))]),
+         [('Bounce from PDL', lambda row: (row['Low'] < row.get('PDL', float('inf'))) and (row['Close'] > row.get('PDL', float('inf')))),
+          ('Strong breakdown below PDL', lambda row: (row['Low'] < row.get('PDL', float('inf'))) and (row['Close'] < row.get('PDL', float('inf'))))]),
 
         # 11. Breaks TC from below (Open < BC & high > TC)
         ('Breaks TC from below',
-         lambda row: (row['Open'] < row.get('BC', -np.inf)) and (row['High'] > row.get('TC', -np.inf)),
-         [('Closes above TC', lambda row: row['Close'] > row.get('TC', np.inf)),
-          ('Closes below BC', lambda row: row['Close'] < row.get('BC', -np.inf))]),
+         lambda row: (row['Open'] < row.get('BC', -float('inf'))) and (row['High'] > row.get('TC', -float('inf'))),
+         [('Closes above TC', lambda row: row['Close'] > row.get('TC', float('inf'))),
+          ('Closes below BC', lambda row: row['Close'] < row.get('BC', -float('inf')))]),
     ]
 
     for scenario_name, cond_func, outcomes in scenarios:
