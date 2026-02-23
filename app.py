@@ -211,11 +211,9 @@ def welcome_page(candle_df, open_df, gap_df, thresholds, hist_df=None):
                     quart = 'Open_Bottom_Quartile'
                 else:
                     quart = 'Open_Middle_Half'
+            open_context = f"{pos}|{cpr_pos}|{quart}"
         else:
-            # No quartile classification for opens outside the range
-            quart = 'Open_Outside_Range'
-
-        open_context = f"{pos}|{cpr_pos}|{quart}"
+            open_context = f"{pos}|{cpr_pos}" 
 
         gap = today_open - prev_close
         gap_dir = 'Gap_Up' if gap > 0 else ('Gap_Down' if gap < 0 else 'No_Gap')
