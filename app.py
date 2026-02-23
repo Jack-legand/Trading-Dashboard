@@ -50,6 +50,10 @@ def load_data():
 
     # Compute aggregated level game scenarios from raw data
     level_stats = compute_level_scenario_stats(level_raw)
+    # Convert string columns to 'string' dtype to avoid Arrow issues
+    for col in ['scenario', 'outcome']:
+        if col in level_stats.columns:
+            level_stats[col] = level_stats[col].astype('string')
 
     # try load raw historical OHLC if available for quick checks
     hist = None
@@ -204,7 +208,12 @@ def compute_level_scenario_stats(level_raw):
                 'probability': outcome_count / total if total > 0 else 0
             })
 
-    return pd.DataFrame(records)
+    result_df = pd.DataFrame(records)
+    # Convert string columns to 'string' dtype to prevent Arrow serialization issues
+    if not result_df.empty:
+        result_df['scenario'] = result_df['scenario'].astype('string')
+        result_df['outcome'] = result_df['outcome'].astype('string')
+    return result_df
 
 
 def compute_cpr(prev_h, prev_l, prev_c):
@@ -724,10 +733,25 @@ def insight_page():
     st.title('📊 Trade Insights & Discipline Monitor')
     st.markdown('---')
     log_path = os.path.join(DATA_DIR, 'trade_log.csv')
+    
+    # Button to clear all trade logs
+    if st.button('🗑️ Clear All Trade Logs', use_container_width=True):
+        if os.path.exists(log_path):
+            os.remove(log_path)
+            st.success('✅ All trade logs cleared.')
+        else:
+            st.info('ℹ️ No trade logs to clear.')
+        st.rerun()
+    
     if not os.path.exists(log_path):
         st.info('ℹ️ No trades logged yet.')
         return
+    
     df = pd.read_csv(log_path)
+    # Convert string columns to 'string' dtype to avoid Arrow issues
+    for col in df.select_dtypes(include=['object']).columns:
+        df[col] = df[col].astype('string')
+    
     closed = df[~df['exit_price'].isna()].copy()
     if closed.empty:
         st.info('ℹ️ No closed trades to analyze yet.')
@@ -781,6 +805,9 @@ def insight_page():
     st.subheader('📋 Execution Discipline')
     discipline_df = closed[['timestamp', 'pre_trade_data_flag', 'exit_reason', 'pnl']].sort_values('timestamp', ascending=False).copy()
     discipline_df.columns = ['Timestamp', 'Data Pre-Planned', 'Exit Reason', 'P&L']
+    # Convert string columns to 'string' dtype for Arrow compatibility
+    for col in discipline_df.select_dtypes(include=['object']).columns:
+        discipline_df[col] = discipline_df[col].astype('string')
     st.dataframe(discipline_df, use_container_width=True, height=400)
 
 
