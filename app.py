@@ -734,20 +734,18 @@ def insight_page():
         if os.path.exists(log_path):
             os.remove(log_path)
             st.success('✅ All trade logs cleared. The page will refresh.')
-            # Do NOT call st.rerun() – let the natural rerun happen after button click
         else:
             st.info('ℹ️ No trade logs to clear.')
-        # No rerun needed; the button click triggers a rerun automatically
     
     if not os.path.exists(log_path):
         st.info('ℹ️ No trades logged yet.')
         return
     
     df = pd.read_csv(log_path)
-    # Convert all object columns to plain strings to avoid Arrow LargeUtf8 issues
+    # Convert all object columns to plain strings (avoid pandas StringDtype)
     for col in df.select_dtypes(include=['object']).columns:
         df[col] = df[col].astype(str)
-    # Convert timestamp to string if it exists (to avoid datetime issues)
+    # Convert timestamp to string if it exists
     if 'timestamp' in df.columns:
         df['timestamp'] = df['timestamp'].astype(str)
     
@@ -804,12 +802,20 @@ def insight_page():
     st.plotly_chart(fig_risk, use_container_width=True)
 
     st.subheader('📋 Execution Discipline')
+    # Prepare the discipline table as a list of dicts and display with markdown to avoid Arrow
     discipline_df = closed[['timestamp', 'pre_trade_data_flag', 'exit_reason', 'pnl']].sort_values('timestamp', ascending=False).copy()
     discipline_df.columns = ['Timestamp', 'Data Pre-Planned', 'Exit Reason', 'P&L']
-    # Convert all columns to strings to avoid Arrow issues
+    # Convert all columns to string and replace NaN/None with empty string
     for col in discipline_df.columns:
-        discipline_df[col] = discipline_df[col].astype(str)
-    st.dataframe(discipline_df, use_container_width=True, height=400)
+        discipline_df[col] = discipline_df[col].astype(str).replace('nan', '')
+    
+    # Create a markdown table
+    markdown_table = "| " + " | ".join(discipline_df.columns) + " |\n"
+    markdown_table += "| " + " | ".join(["---"] * len(discipline_df.columns)) + " |\n"
+    for _, row in discipline_df.iterrows():
+        markdown_table += "| " + " | ".join(row.values) + " |\n"
+    
+    st.markdown(markdown_table, unsafe_allow_html=True)
 
 
 def main():
