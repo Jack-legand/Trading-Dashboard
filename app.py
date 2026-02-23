@@ -50,10 +50,6 @@ def load_data():
 
     # Compute aggregated level game scenarios from raw data
     level_stats = compute_level_scenario_stats(level_raw)
-    # Convert string columns to 'string' dtype to avoid Arrow issues
-    for col in ['scenario', 'outcome']:
-        if col in level_stats.columns:
-            level_stats[col] = level_stats[col].astype('string')
 
     # try load raw historical OHLC if available for quick checks
     hist = None
@@ -209,10 +205,9 @@ def compute_level_scenario_stats(level_raw):
             })
 
     result_df = pd.DataFrame(records)
-    # Convert string columns to 'string' dtype to prevent Arrow serialization issues
-    if not result_df.empty:
-        result_df['scenario'] = result_df['scenario'].astype('string')
-        result_df['outcome'] = result_df['outcome'].astype('string')
+    # Convert any string columns to plain object type to avoid Arrow issues
+    for col in result_df.select_dtypes(include=['string']).columns:
+        result_df[col] = result_df[col].astype(str)
     return result_df
 
 
@@ -738,19 +733,23 @@ def insight_page():
     if st.button('🗑️ Clear All Trade Logs', use_container_width=True):
         if os.path.exists(log_path):
             os.remove(log_path)
-            st.success('✅ All trade logs cleared.')
+            st.success('✅ All trade logs cleared. The page will refresh.')
+            # Do NOT call st.rerun() – let the natural rerun happen after button click
         else:
             st.info('ℹ️ No trade logs to clear.')
-        st.rerun()
+        # No rerun needed; the button click triggers a rerun automatically
     
     if not os.path.exists(log_path):
         st.info('ℹ️ No trades logged yet.')
         return
     
     df = pd.read_csv(log_path)
-    # Convert string columns to 'string' dtype to avoid Arrow issues
+    # Convert all object columns to plain strings to avoid Arrow LargeUtf8 issues
     for col in df.select_dtypes(include=['object']).columns:
-        df[col] = df[col].astype('string')
+        df[col] = df[col].astype(str)
+    # Convert timestamp to string if it exists (to avoid datetime issues)
+    if 'timestamp' in df.columns:
+        df['timestamp'] = df['timestamp'].astype(str)
     
     closed = df[~df['exit_price'].isna()].copy()
     if closed.empty:
@@ -784,6 +783,8 @@ def insight_page():
     st.subheader('📈 Equity Curve')
     closed_sorted = closed.sort_values('timestamp')
     closed_sorted['cum_pnl'] = closed_sorted['pnl'].cumsum()
+    # Ensure timestamp is string for plotting
+    closed_sorted['timestamp'] = closed_sorted['timestamp'].astype(str)
     
     fig_equity = go.Figure()
     fig_equity.add_trace(go.Scatter(x=closed_sorted['timestamp'], y=closed_sorted['cum_pnl'],
@@ -805,9 +806,9 @@ def insight_page():
     st.subheader('📋 Execution Discipline')
     discipline_df = closed[['timestamp', 'pre_trade_data_flag', 'exit_reason', 'pnl']].sort_values('timestamp', ascending=False).copy()
     discipline_df.columns = ['Timestamp', 'Data Pre-Planned', 'Exit Reason', 'P&L']
-    # Convert string columns to 'string' dtype for Arrow compatibility
-    for col in discipline_df.select_dtypes(include=['object']).columns:
-        discipline_df[col] = discipline_df[col].astype('string')
+    # Convert all columns to strings to avoid Arrow issues
+    for col in discipline_df.columns:
+        discipline_df[col] = discipline_df[col].astype(str)
     st.dataframe(discipline_df, use_container_width=True, height=400)
 
 
