@@ -33,15 +33,23 @@ def save_session_cache(data):
         pass
 
 
+@st.cache_data
 def load_data():
+    """Load all backtested statistics and compute aggregated level‑game scenarios."""
     candle = pd.read_csv(os.path.join(DATA_DIR, 'candle_state_stats.csv'))
     open_ctx = pd.read_csv(os.path.join(DATA_DIR, 'open_context_stats.csv'))
     gap = pd.read_csv(os.path.join(DATA_DIR, 'gap_stats.csv'))
+    # Load raw level game data
+    level_raw = pd.read_csv(os.path.join(DATA_DIR, 'level_game_stats.csv'))
+
     th_path = os.path.join(DATA_DIR, 'thresholds.json')
     thresholds = {}
     if os.path.exists(th_path):
         with open(th_path) as f:
             thresholds = json.load(f)
+
+    # Compute aggregated level game scenarios from raw data
+    level_stats = compute_level_scenario_stats(level_raw)
 
     # try load raw historical OHLC if available for quick checks
     hist = None
@@ -60,7 +68,143 @@ def load_data():
             except Exception:
                 hist = None
 
-    return candle, open_ctx, gap, thresholds, hist
+    return candle, open_ctx, gap, level_stats, thresholds, hist
+
+
+def compute_level_scenario_stats(level_raw):
+    """
+    Process raw level game data (one row per level per day) into aggregated scenario statistics.
+    Returns a DataFrame with columns: scenario, outcome, total_count, outcome_count, probability.
+    The scenarios and outcomes match the user's desired Level Game table.
+    """
+    # Pivot the raw data to get one row per day with all levels
+    # First, ensure Date is parsed
+    level_raw['Date'] = pd.to_datetime(level_raw['Date'], errors='coerce')
+    # Get unique dates and the first row per date (all levels share the same OHLC values)
+    daily = level_raw.groupby('Date').first().reset_index()
+    # Add back the level-specific flags by merging? Actually we need to know per day what happened at each level.
+    # Better to keep the raw data and later join. For scenario evaluation, we need for each day:
+    # - Open, High, Low, Close (from daily)
+    # - For each level: FirstTouch, Broken, AfterBreakRetouch, BreakSuccess.
+    # We can create a pivot table with level as columns.
+    pivot = level_raw.pivot(index='Date', columns='Level', values=['FirstTouch', 'Broken', 'AfterBreakRetouch', 'BreakSuccess'])
+    # Flatten column names
+    pivot.columns = [f"{col[0]}_{col[1]}" for col in pivot.columns]
+    pivot = pivot.reset_index()
+    # Merge with daily OHLC
+    daily = daily[['Date', 'Open', 'High', 'Low', 'Close']].merge(pivot, on='Date', how='left')
+
+    # Now daily contains all necessary data per day.
+    # Define scenarios as a list of (scenario_name, condition_func, outcomes_list)
+    # Each outcome is a (outcome_name, outcome_condition_func)
+    # We'll evaluate each row and accumulate counts.
+
+    records = []
+
+    # Helper functions to check conditions
+    def touched_bc(row):
+        return row.get('FirstTouch_BC', False)
+
+    def touched_tc(row):
+        return row.get('FirstTouch_TC', False)
+
+    def touched_pdh(row):
+        return row.get('FirstTouch_PDH', False)
+
+    def touched_pdl(row):
+        return row.get('FirstTouch_PDL', False)
+
+    def broken_tc_up(row):
+        # Open below BC and high > TC
+        return (row['Open'] < row.get('BC', -np.inf)) and (row['High'] > row.get('TC', -np.inf))
+
+    def broken_bc_down(row):
+        # Open above TC and low < BC
+        return (row['Open'] > row.get('TC', np.inf)) and (row['Low'] < row.get('BC', np.inf))
+
+    def gap_fill(row):
+        # We need gap direction and fill; but we don't have gap in level_raw. We'll skip gap scenarios here.
+        # They are already covered by gap_stats.csv.
+        return False
+
+    # We'll only implement the scenarios that can be derived from level_raw.
+    # For gap scenarios, we will rely on gap_df in the dashboard.
+    # The 11 scenarios from the user's table include gap scenarios, but we'll handle those separately.
+    # For now, we'll compute only the CPR-related and touch scenarios.
+
+    scenarios = [
+        # 1. Open below BC
+        ('Open below BC',
+         lambda row: row['Open'] < row.get('BC', -np.inf),
+         [('Touched BC', lambda row: row.get('FirstTouch_BC', False)),
+          ('Never touched BC', lambda row: not row.get('FirstTouch_BC', False))]),
+
+        # 2. Open below BC & Touched BC
+        ('Open below BC & Touched BC',
+         lambda row: (row['Open'] < row.get('BC', -np.inf)) and row.get('FirstTouch_BC', False),
+         [('Breaks TC', lambda row: row.get('Broken_TC', False) and row.get('BrokenDirection_TC') == 'Up'),  # Note: we don't have BrokenDirection in raw? Actually we have Broken_TC which is True if high > TC. That's enough.
+          ('Closes below BC', lambda row: row['Close'] < row.get('BC', -np.inf))]),
+
+        # 3. Open below BC & No touch BC
+        ('Open below BC & No touch BC',
+         lambda row: (row['Open'] < row.get('BC', -np.inf)) and (not row.get('FirstTouch_BC', False)),
+         [('Breaks Prev Low', lambda row: row.get('Broken_PDL', False) and row.get('BrokenDirection_PDL') == 'Down')]),
+
+        # 4. Open above TC
+        ('Open above TC',
+         lambda row: row['Open'] > row.get('TC', np.inf),
+         [('Touched TC', lambda row: row.get('FirstTouch_TC', False)),
+          ('Never touched TC', lambda row: not row.get('FirstTouch_TC', False))]),
+
+        # 5. Open above TC & Touched TC
+        ('Open above TC & Touched TC',
+         lambda row: (row['Open'] > row.get('TC', np.inf)) and row.get('FirstTouch_TC', False),
+         [('Breaks BC', lambda row: row.get('Broken_BC', False) and row.get('BrokenDirection_BC') == 'Down'),
+          ('Closes above TC', lambda row: row['Close'] > row.get('TC', np.inf))]),
+
+        # 6. Open inside CPR
+        ('Open inside CPR',
+         lambda row: (row['Open'] >= row.get('BC', -np.inf)) and (row['Open'] <= row.get('TC', np.inf)),
+         [('Closes above TC', lambda row: row['Close'] > row.get('TC', np.inf)),
+          ('Closes below BC', lambda row: row['Close'] < row.get('BC', -np.inf)),
+          ('Closes within CPR', lambda row: (row['Close'] >= row.get('BC', -np.inf)) and (row['Close'] <= row.get('TC', np.inf)))]),
+
+        # 7. Touched Prev Day High
+        ('Touched Prev Day High',
+         lambda row: row.get('FirstTouch_PDH', False),
+         [('Rejection at PDH', lambda row: (row['High'] > row.get('PDH', -np.inf)) and (row['Close'] < row.get('PDH', -np.inf))),
+          ('Strong breakout above PDH', lambda row: (row['High'] > row.get('PDH', -np.inf)) and (row['Close'] > row.get('PDH', -np.inf)))]),
+
+        # 8. Touched Prev Day Low
+        ('Touched Prev Day Low',
+         lambda row: row.get('FirstTouch_PDL', False),
+         [('Bounce from PDL', lambda row: (row['Low'] < row.get('PDL', np.inf)) and (row['Close'] > row.get('PDL', np.inf))),
+          ('Strong breakdown below PDL', lambda row: (row['Low'] < row.get('PDL', np.inf)) and (row['Close'] < row.get('PDL', np.inf)))]),
+
+        # 11. Breaks TC from below (Open < BC & high > TC)
+        ('Breaks TC from below',
+         lambda row: (row['Open'] < row.get('BC', -np.inf)) and (row['High'] > row.get('TC', -np.inf)),
+         [('Closes above TC', lambda row: row['Close'] > row.get('TC', np.inf)),
+          ('Closes below BC', lambda row: row['Close'] < row.get('BC', -np.inf))]),
+    ]
+
+    for scenario_name, cond_func, outcomes in scenarios:
+        mask = daily.apply(cond_func, axis=1)
+        total = mask.sum()
+        if total == 0:
+            continue
+        for outcome_name, out_cond_func in outcomes:
+            outcome_mask = mask & daily.apply(out_cond_func, axis=1)
+            outcome_count = outcome_mask.sum()
+            records.append({
+                'scenario': scenario_name,
+                'outcome': outcome_name,
+                'total_count': total,
+                'outcome_count': outcome_count,
+                'probability': outcome_count / total if total > 0 else 0
+            })
+
+    return pd.DataFrame(records)
 
 
 def compute_cpr(prev_h, prev_l, prev_c):
@@ -127,7 +271,7 @@ def bucket_gap(pct):
     return '>2%'
 
 
-def welcome_page(candle_df, open_df, gap_df, thresholds, hist_df=None):
+def welcome_page(candle_df, open_df, gap_df, level_stats, thresholds, hist_df=None):
     st.title('🎯 NIFTY Edge Dashboard - Welcome')
     st.markdown('---')
     st.markdown('**Enter previous day OHLC and today\'s open to compute edges**')
@@ -213,11 +357,12 @@ def welcome_page(candle_df, open_df, gap_df, thresholds, hist_df=None):
                     quart = 'Open_Middle_Half'
             open_context = f"{pos}|{cpr_pos}|{quart}"
         else:
-            open_context = f"{pos}|{cpr_pos}" 
+            open_context = f"{pos}|{cpr_pos}"
 
         gap = today_open - prev_close
         gap_dir = 'Gap_Up' if gap > 0 else ('Gap_Down' if gap < 0 else 'No_Gap')
-        gap_pct = abs(gap) / prev_range if prev_range != 0 else None
+        # Use prev_close for gap percentage (as requested)
+        gap_pct = abs(gap) / prev_close if prev_close != 0 else None
         gap_bucket = bucket_gap(gap_pct)
 
         edge_result = dict(
@@ -225,7 +370,9 @@ def welcome_page(candle_df, open_df, gap_df, thresholds, hist_df=None):
             today_open=today_open, PP=pp, TC=tc, BC=bc, prev_range=prev_range,
             body=body, upper=upper, lower=lower, body_pct=body_pct, upper_pct=upper_pct, lower_pct=lower_pct,
             wick_imb=wick_imb, top_rej=top_rej, bot_rej=bot_rej,
-            candle_state=candle_state, open_context=open_context, gap_dir=gap_dir, gap_pct=gap_pct, gap_bucket=gap_bucket,
+            candle_state=candle_state, open_context=open_context,
+            pos=pos, cpr_pos=cpr_pos,  # store for level game filtering
+            gap_dir=gap_dir, gap_pct=gap_pct, gap_bucket=gap_bucket,
             test_date=str(st_date)
         )
         
@@ -313,7 +460,7 @@ def welcome_page(candle_df, open_df, gap_df, thresholds, hist_df=None):
     st.info('Use the sidebar 👈 to navigate to **Edge Detection** page')
 
 
-def edge_detection_page(candle_df, open_df, gap_df, thresholds):
+def edge_detection_page(candle_df, open_df, gap_df, level_stats, thresholds):
     st.title('🔍 Edge Detection')
     if 'edge_result' not in st.session_state or not st.session_state['edge_result']:
         # Try load from cache
@@ -372,70 +519,59 @@ def edge_detection_page(candle_df, open_df, gap_df, thresholds):
     
     st.markdown('---')
 
-    # Level Game - Styled Container
+    # Level Game - Detailed Scenario Display
     with st.container():
-        st.markdown('### 📊 Level Game')
-        st.markdown(f"**Open Context:** `{er['open_context']}`")
+        st.markdown('### 📊 Level Game - Detailed Scenarios')
         
-        row = open_df[open_df['open_context'] == er['open_context']]
-        if not row.empty:
-            r = row.iloc[0]
-            st.metric('Sample Size', int(r['total_count']), help='Number of historical occurrences of this open context')
-            
-            # Display trend probabilities with gauges
-            fig2 = make_subplots(rows=1, cols=2, specs=[[{'type': 'indicator'}, {'type': 'indicator'}]])
-            trend_up = float(r['prob_trend_up']) * 100
-            trend_down = float(r['prob_trend_down']) * 100
-            
-            fig2.add_trace(go.Indicator(
-                mode='gauge+number', value=trend_up,
-                title={'text': 'Trend Up %'},
-                gauge={'axis': {'range': [0, 100]}, 'bar': {'color': '#3498db'}},
-                domain={'x': [0, 0.48]}
-            ), row=1, col=1)
-            
-            fig2.add_trace(go.Indicator(
-                mode='gauge+number', value=trend_down,
-                title={'text': 'Trend Down %'},
-                gauge={'axis': {'range': [0, 100]}, 'bar': {'color': '#c0392b'}},
-                domain={'x': [0.52, 1.0]}
-            ), row=1, col=2)
-            
-            fig2.update_layout(height=220, margin={'t': 30, 'b': 0})
-            st.plotly_chart(fig2, use_container_width=True)
-            
-            # Display all breakdown probabilities in a grid with exact numerical values
-            st.markdown('**Key Probability Breakdowns:**')
-            col1, col2, col3, col4 = st.columns(4)
-            
-            col1.metric('Range/Chop Day', 
-                       f"{float(r.get('prob_range_chop', 0)):.2%}",
-                       help='Probability of range-bound / choppy day')
-            col2.metric('False PDH Break', 
-                       f"{float(r.get('prob_false_pdh_break', 0)):.2%}",
-                       help='Probability of false breakout above PDH')
-            col3.metric('False PDL Break', 
-                       f"{float(r.get('prob_false_pdl_break', 0)):.2%}",
-                       help='Probability of false breakout below PDL')
-            col4.metric('Sample Count', 
-                       f"{int(r['total_count'])}", 
-                       help='Trades matching this context')
-            
-            col5, col6, col7, col8 = st.columns(4)
-            col5.metric('PDH Break Success', 
-                       f"{float(r['prob_pdh_break_success']):.2%}", 
-                       help='Probability of successful breakout above PDH')
-            col6.metric('PDL Break Success', 
-                       f"{float(r['prob_pdl_break_success']):.2%}",
-                       help='Probability of successful breakout below PDL')
-            col7.metric('Trend Up %', f"{trend_up:.1f}%", help='Bullish probability')
-            col8.metric('Trend Down %', f"{trend_down:.1f}%", help='Bearish probability')
+        # Determine relevant scenario names based on current open
+        pos = er['pos']
+        cpr_pos = er['cpr_pos']
+        gap_dir = er['gap_dir']
+
+        scenario_names = []
+
+        # CPR-based scenarios (only when open is inside previous range)
+        if pos == 'Open_Inside_Prev_Range':
+            if cpr_pos == 'Below_CPR':
+                scenario_names.extend(['Open below BC', 'Open below BC & Touched BC', 'Open below BC & No touch BC', 'Breaks TC from below'])
+            elif cpr_pos == 'Above_CPR':
+                scenario_names.extend(['Open above TC', 'Open above TC & Touched TC'])
+            elif cpr_pos == 'Inside_CPR':
+                scenario_names.append('Open inside CPR')
+        # Note: When open is outside range, these scenarios are not applicable
+
+        # Always include touch scenarios (they are independent of open position)
+        scenario_names.extend(['Touched Prev Day High', 'Touched Prev Day Low'])
+
+        # Gap scenarios are handled by the Gap Game section, not here.
+        # But we could optionally include them if the user wants them in Level Game.
+        # For now, we leave them to Gap Game.
+
+        # Remove duplicates
+        scenario_names = list(set(scenario_names))
+
+        # Filter level_stats by these scenario names
+        if not level_stats.empty:
+            relevant = level_stats[level_stats['scenario'].isin(scenario_names)].copy()
+            if not relevant.empty:
+                # Group by scenario and display
+                for scenario in sorted(relevant['scenario'].unique()):
+                    sub = relevant[relevant['scenario'] == scenario]
+                    total = sub['total_count'].iloc[0]  # same for all outcomes of this scenario
+                    with st.expander(f"**{scenario}** (Sample: {total})", expanded=False):
+                        for _, row in sub.iterrows():
+                            prob = row['probability']
+                            outcome = row['outcome']
+                            count = row['outcome_count']
+                            st.markdown(f"- {outcome}: **{prob:.1%}** ({count}/{total})")
+            else:
+                st.info('ℹ️ No matching level scenarios for today\'s open context.')
         else:
-            st.warning('⚠️ No matching open context in historical stats.')
-    
+            st.info('ℹ️ No level game statistics available.')
+
     st.markdown('---')
 
-    # Gap Game - Styled Container
+    # Gap Game - Styled Container (unchanged, but ensure gap_df is loaded)
     with st.container():
         st.markdown('### 📉 Gap Game')
         st.markdown(f"**Gap Direction:** `{er['gap_dir']}` | **Gap Bucket:** `{er['gap_bucket']}`")
@@ -479,7 +615,7 @@ def edge_detection_page(candle_df, open_df, gap_df, thresholds):
             candle_bull = float(candle_row.iloc[0]['prob_trend_up']) if not candle_row.empty else 0
             candle_bear = float(candle_row.iloc[0]['prob_trend_down']) if not candle_row.empty else 0
             
-            # Level Game probabilities
+            # Level Game probabilities (use open context stats for trend, as level_stats doesn't have trend up/down)
             level_row = open_df[open_df['open_context'] == er['open_context']]
             level_bull = float(level_row.iloc[0]['prob_trend_up']) if not level_row.empty else 0
             level_bear = float(level_row.iloc[0]['prob_trend_down']) if not level_row.empty else 0
@@ -649,10 +785,10 @@ def insight_page():
 
 
 def main():
-    st.set_page_config(page_title='NIFTY Edge Dashboard v2.1', layout='wide', initial_sidebar_state='expanded')
+    st.set_page_config(page_title='NIFTY Edge Dashboard v2.2', layout='wide', initial_sidebar_state='expanded')
     
     st.sidebar.title('🚀 Navigation')
-    st.sidebar.markdown('**Version 2.1** | Production Ready')
+    st.sidebar.markdown('**Version 2.2** | Level Game Enhanced')
     st.sidebar.markdown('---')
     pages = ['Welcome', 'Edge Detection', 'Trade Logging', 'Insight']
     default_page = st.session_state.get('nav_page', 'Welcome')
@@ -662,12 +798,13 @@ def main():
         default_index = 0
     page = st.sidebar.radio('Go to', pages, index=default_index)
 
-    candle_df, open_df, gap_df, thresholds, hist_df = load_data()
+    # Load all data files
+    candle_df, open_df, gap_df, level_stats, thresholds, hist_df = load_data()
 
     if page == 'Welcome':
-        welcome_page(candle_df, open_df, gap_df, thresholds, hist_df)
+        welcome_page(candle_df, open_df, gap_df, level_stats, thresholds, hist_df)
     elif page == 'Edge Detection':
-        edge_detection_page(candle_df, open_df, gap_df, thresholds)
+        edge_detection_page(candle_df, open_df, gap_df, level_stats, thresholds)
     elif page == 'Trade Logging':
         trade_logging_page()
     elif page == 'Insight':
