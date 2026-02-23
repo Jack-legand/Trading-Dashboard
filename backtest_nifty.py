@@ -381,8 +381,11 @@ def main():
 
     # CPR
     df['PP'] = (df['PDH'] + df['PDL'] + df['PDC']) / 3.0
-    df['TC'] = df['PP'] + (df['PDH'] - df['PDL']) / 2.0
-    df['BC'] = df['PP'] - (df['PDH'] - df['PDL']) / 2.0
+    df['BC'] = (df['PDH'] + df['PDL']) / 2.0
+    df['TC'] = (df['PP'] - df['BC']) + df['PP']
+    # Swap if TC < BC to ensure TC is max and BC is min
+    swap_mask = df['TC'] < df['BC']
+    df.loc[swap_mask, ['TC', 'BC']] = df.loc[swap_mask, ['BC', 'TC']].values
     df['CPR_width'] = df['TC'] - df['BC']
 
     # candle structure metrics for previous day

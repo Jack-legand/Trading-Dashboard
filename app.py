@@ -65,8 +65,11 @@ def load_data():
 
 def compute_cpr(prev_h, prev_l, prev_c):
     pp = (prev_h + prev_l + prev_c) / 3.0
-    tc = pp + (prev_h - prev_l) / 2.0
-    bc = pp - (prev_h - prev_l) / 2.0
+    bc = (prev_h + prev_l) / 2.0
+    tc = (pp - bc) + pp
+    # Swap if TC < BC to ensure TC is max and BC is min
+    if tc < bc:
+        tc, bc = bc, tc
     return pp, tc, bc
 
 
@@ -254,7 +257,7 @@ def welcome_page(candle_df, open_df, gap_df, thresholds, hist_df=None):
         col1, col2, col3, col4 = st.columns(4)
         col1.metric('Today\'s Open', f'{today_open:.2f}')
         col2.metric('Gap Size', f'{abs(gap):.2f}', delta=gap_dir)
-        col3.metric('Gap %', f'{abs(gap_pct)*100:.2f}%' if gap_pct else 'N/A', help='Gap as % of previous range')
+        col3.metric('Gap Ratio (of range)', f'{abs(gap_pct):.4f}' if gap_pct else 'N/A', help='Gap as decimal fraction of previous range')
         col4.metric('Gap Bucket', gap_bucket if gap_bucket else 'Unknown', help='Gap size classification')
         
         st.markdown('### 🎯 Open Context Classification')
