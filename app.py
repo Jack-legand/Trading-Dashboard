@@ -219,7 +219,7 @@ def welcome_page(candle_df, open_df, gap_df, thresholds, hist_df=None):
 
         gap = today_open - prev_close
         gap_dir = 'Gap_Up' if gap > 0 else ('Gap_Down' if gap < 0 else 'No_Gap')
-        gap_pct = abs(gap) / prev_range if prev_range != 0 else None
+        gap_pct = abs(gap) / prev_close if prev_close != 0 else None
         gap_bucket = bucket_gap(gap_pct)
 
         edge_result = dict(
@@ -257,7 +257,7 @@ def welcome_page(candle_df, open_df, gap_df, thresholds, hist_df=None):
         col1, col2, col3, col4 = st.columns(4)
         col1.metric('Today\'s Open', f'{today_open:.2f}')
         col2.metric('Gap Size', f'{abs(gap):.2f}', delta=gap_dir)
-        col3.metric('Gap Ratio (of range)', f'{abs(gap_pct):.4f}' if gap_pct else 'N/A', help='Gap as decimal fraction of previous range')
+        col3.metric('Gap %', f'{abs(gap_pct)*100:.2f}%' if gap_pct else 'N/A', help='Gap as percentage of previous close')
         col4.metric('Gap Bucket', gap_bucket if gap_bucket else 'Unknown', help='Gap size classification')
         
         st.markdown('### 🎯 Open Context Classification')

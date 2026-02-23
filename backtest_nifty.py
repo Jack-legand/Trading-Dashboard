@@ -229,7 +229,7 @@ def gap_analysis(df):
     gaps = df['Open'] - df['prev_close']
     df['gap'] = gaps
     df['gap_direction'] = np.where(gaps > 0, 'Gap_Up', np.where(gaps < 0, 'Gap_Down', 'No_Gap'))
-    df['gap_size_pct'] = safe_div(abs(gaps), df['prev_range'])
+    df['gap_size_pct'] = safe_div(abs(gaps), df['prev_close'])
 
     fill50 = []
     fill80 = []
