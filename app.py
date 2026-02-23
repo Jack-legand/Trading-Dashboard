@@ -651,9 +651,11 @@ def insight_page():
 
 
 def main():
-    st.set_page_config(page_title='NIFTY Edge Dashboard', layout='wide', initial_sidebar_state='expanded')
+    st.set_page_config(page_title='NIFTY Edge Dashboard v2.1', layout='wide', initial_sidebar_state='expanded')
     
     st.sidebar.title('🚀 Navigation')
+    st.sidebar.markdown('**Version 2.1** | Production Ready')
+    st.sidebar.markdown('---')
     pages = ['Welcome', 'Edge Detection', 'Trade Logging', 'Insight']
     default_page = st.session_state.get('nav_page', 'Welcome')
     try:

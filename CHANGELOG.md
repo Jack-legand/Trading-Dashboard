@@ -1,32 +1,100 @@
-# 🔄 Changelog - NIFTY Edge Dashboard v2.0
+# � Changelog - NIFTY Edge Dashboard
 
-## Summary
-Complete enhancement of the NIFTY Edge Dashboard with persistent data storage, professional visualizations, and improved user interface. All changes integrated into `app.py` which now contains 562 lines (previously 403).
+All notable changes to this project are documented here.
+
+---
+
+## [2.1] - February 23, 2026
+
+### 🔧 Critical Bug Fixes
+
+#### CPR Formula Correction
+**Old Formula**: `TC = PP + (H-L)/2`, `BC = PP - (H-L)/2`
+**New Formula**: `BC = (H+L)/2`, `TC = (PP-BC)+PP`, with TC/BC swap
+
+Impact:
+- More accurate support/resistance levels
+- Better entry/exit decisions
+
+Files Changed: `app.py`, `backtest_nifty.py`
+
+#### Gap Percentage Calculation Fix
+**Old Formula**: `Gap % = |Open - Close| / Previous_Range × 100`
+**New Formula**: `Gap % = |Open - Previous_Close| / Previous_Close × 100`
+
+Impact:
+- Gap percentages now reflect market reality
+- Gap buckets redistributed correctly
+- Example: Gap 54 with prev_close 25,819 = 0.21% (was 26.76%)
+
+Files Changed: `app.py`, `backtest_nifty.py`
+
+### 📊 Data Regeneration
+
+**gap_stats.csv** - Dramatic redistribution:
+- Gap_Up >2%: 1,134 → 17 samples
+- Gap_Up 0-0.5%: 6 → 905 samples
+- Gap_Down 0-0.5%: 6 → 442 samples
+
+**open_context_stats.csv** - Moderate adjustments:
+- PDH/PDL break probabilities recalculated
+- Gap context updated
+
+**candle_state_stats.csv** - Minimal changes:
+- Candle classification formula unchanged
+- Marginal probability updates
+
+**thresholds.json** - Unchanged:
+- Body % percentiles independent
+
+### 🧹 Repository Cleanup
+
+Removed 14+ files for focused repository:
+- Old docs: ARCHITECTURE.md, COMPLETION_REPORT.md, FINAL_SUMMARY.md, IMPROVEMENTS.md, QUICKSTART.md, START_HERE.md, SUCCESS.md, SUMMARY.md
+- Helper scripts: complete_backtest_and_push.py, execute_backtest.py, git_workflow.py, push_changes.sh, run_backtest_and_push.py
+- Unused: app_new.py, imghdr.py, imghdr_pkg/
+
+### 📝 Documentation Updates
+
+New consolidated structure:
+- `README.md` - Quick start guide
+- `INDEX.md` - Complete feature documentation
+- `FILE_STRUCTURE.md` - File inventory (new)
+- `CHANGELOG.md` - Version history (this file)
 
 ---
 
-## Version 2.0 Changes
+## [2.0] - Previous Release
 
-### 🔒 Session Persistence (NEW)
-**Lines 15-34** - New session management system
+### ✨ Features
 
-```python
-def load_session_cache():
-    """Load persistent session data from JSON file."""
-    
-def save_session_cache(data):
-    """Save session data to JSON file for persistence across reruns."""
-```
+**Three Independent Games**
+- Candle Structure Game: Pattern analysis
+- Level Game: Open context evaluation  
+- Gap Game: Gap fill probability
 
-**Implementation**:
-- Reads from/writes to `data/.session_cache.json`
-- Called 3 times in app: line 133, 228, 294
-- Preserves OHLC inputs, test date, computed edges
-- Data restores automatically on dashboard reopen
+**Dashboard Pages**
+- Welcome: Input OHLC and calculate edges
+- Edge Detection: Three games + trading signal
+- Trade Logging: Trade recording and discipline
+- Insights: Performance analytics
 
-**Impact**: Users no longer need to re-enter OHLC values across sessions ✨
+**Statistics**
+- candle_state_stats.csv: Pattern probabilities
+- open_context_stats.csv: Context probabilities
+- gap_stats.csv: Gap fill statistics
+- thresholds.json: Classification thresholds
 
 ---
+
+## [1.0] - Initial Release
+
+MVP with basic edge detection and CPR analysis
+
+---
+
+**Last Updated**: February 23, 2026  
+**Current Version**: 2.1
 
 ### 🎨 Enhanced Welcome Page (IMPROVED)
 **Lines 127-287** - Complete redesign for visual appeal and persistence
