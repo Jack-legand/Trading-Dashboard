@@ -217,7 +217,7 @@ def welcome_page(candle_df, open_df, gap_df, thresholds, hist_df=None):
 
         gap = today_open - prev_close
         gap_dir = 'Gap_Up' if gap > 0 else ('Gap_Down' if gap < 0 else 'No_Gap')
-        gap_pct = abs(gap) / prev_close if prev_close != 0 else None
+        gap_pct = abs(gap) / prev_range if prev_range != 0 else None
         gap_bucket = bucket_gap(gap_pct)
 
         edge_result = dict(
